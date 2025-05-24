@@ -10,129 +10,109 @@ import pandas as pd
 import math
 import io
 
-st.title("Zylinderabstandsrechner mit dualem Export")
+st.title("Rechner für Zylinder und Abstand")
 
-def hat_max_3_dezimalstellen(zahl: float) -> bool:
-    """Prüft ob eine Zahl maximal 3 Dezimalstellen hat (ohne Rundung)"""
-    num_str = f"{zahl:.10f}"
-    if '.' in num_str:
-        decimal_part = num_str.split('.')[1].rstrip('0')
-        return len(decimal_part) <= 3
-    return True
+# Original-Funktionen 1:1 übernommen
+def process(value, length, filter=None):
+    [name, x] = value
+    possible_n_min = x / (length + 10)
+    possible_n_max = x / (length + 2)
+    res = [name]
+    for i in range(int(math.ceil(possible_n_min)), int(math.ceil(possible_n_max))):
+        a1 = (x - i * length) / i
+        if (a1 > 2 and a1 < 10 and (not filter or filter(a1))):
+            res.append(a1)
+    return res
 
-def korrigiere_einheiten(wert: float) -> float:
-    """Korrigiert Einheiten für Werte > 1000 (mm zu Meter)"""
-    return wert / 1000 if wert > 1000 else wert
+def process_all(values, length, filter=None):
+    return list(map(lambda x: process(x, length, filter), values))
 
-def verarbeite_daten(datei) -> list:
-    """Liest und bereinigt die Excel-Daten"""
+def correct_data(data):
+    def make_it_lower_than_1000(x):
+        [x0, x1] = x
+        while (x1 > 1000):
+            x1 /= 10
+        return [x0, x1]
+    return list(map(make_it_lower_than_1000, data))
+
+def check_decimals(num):
     try:
-        df = pd.read_excel(datei)
-        df.columns = [col.strip().upper() for col in df.columns]
-        
-        if not all(col in df.columns for col in ['NAME', 'VALUE']):
-            st.error("Erforderliche Spalten 'NAME' oder 'VALUE' nicht gefunden")
-            return None
-            
-        df['VALUE'] = pd.to_numeric(df['VALUE'], errors='coerce')
-        df = df.dropna(subset=['VALUE'])
-        df['VALUE'] = df['VALUE'].apply(korrigiere_einheiten)
-        
-        return df[['NAME', 'VALUE']].values.tolist()
-        
-    except Exception as e:
-        st.error(f"Fehler beim Datenimport: {str(e)}")
-        return None
+        float_num = float(int(num * 10**5) / 10 ** 5)
+        decimal_places = str(float_num).split(".")[1]
+        if len(decimal_places) > 2:
+            return False
+        return True
+    except:
+        return False
 
-def berechne_abstaende(daten: list, laenge: float) -> tuple:
-    """Berechnet alle möglichen Abstände und gefilterte Ergebnisse"""
-    alle_ergebnisse = []
-    gefilterte_ergebnisse = []
-    
-    for name, messwert in daten:
-        zeile_alle = [name]
-        zeile_gefiltert = [name]
-        
-        try:
-            n_min = math.ceil(messwert / (laenge + 10))
-            n_max = math.ceil(messwert / (laenge + 2))
-            
-            for n in range(n_min, n_max + 1):
-                abstand = (messwert - n * laenge) / n
-                if 2 < abstand < 10:
-                    abstand_str = f"{abstand:.10f}".rstrip("0").rstrip(".") + " mm"
-                    zeile_alle.append(f"{n}x ({abstand_str})")
-                    
-                    if hat_max_3_dezimalstellen(abstand):
-                        zeile_gefiltert.append(f"{n}x ({abstand_str})")
-        
-        except Exception as e:
-            st.warning(f"Fehler bei {name}: {str(e)}")
-            continue
-        
-        alle_ergebnisse.append(zeile_alle)
-        if len(zeile_gefiltert) > 1:  # Nur wenn Ergebnisse vorhanden sind
-            gefilterte_ergebnisse.append(zeile_gefiltert)
-    
-    return alle_ergebnisse, gefilterte_ergebnisse
+def load_value_from_file(file):
+    df = pd.read_excel(file)
+    rs = correct_data(df.values.T[0:2].T)
+    return rs
 
 # Streamlit UI
-uploaded_file = st.file_uploader("Excel-Datei hochladen", type=["xlsx"])
-label_length = st.number_input("Etikettenlänge (mm)", min_value=0.1, value=50.0, step=0.1)
+uploaded_file = st.file_uploader("Excel-Datei hochladen (xlsx)", type=["xlsx"])
+length_input = st.text_input("Etikett Länge (z.B. 50.0)", "0")
 
-if st.button("Berechnen und Exportieren"):
+if st.button("Berechne und Exportiere"):
     if uploaded_file is None:
-        st.error("Bitte zuerst eine Excel-Datei hochladen")
+        st.error("Bitte zuerst eine Excel-Datei hochladen.")
     else:
-        with st.spinner("Daten werden verarbeitet..."):
-            daten = verarbeite_daten(uploaded_file)
+        try:
+            length = float(length_input.replace(",", "."))
             
-            if daten:
-                alle, gefiltert = berechne_abstaende(daten, label_length)
-                
-                # Finde maximale Anzahl von Optionen für die Spalten
-                max_options_alle = max(len(row) for row in alle) - 1 if alle else 0
-                max_options_gefiltert = max(len(row) for row in gefiltert) - 1 if gefiltert else 0
-                
-                try:
-                    # Erstelle DataFrames mit dynamischen Spalten
-                    df_alle = pd.DataFrame(alle, columns=["Zylinder"] + [f"Option {i+1}" for i in range(max_options_alle)])
-                    df_gefiltert = pd.DataFrame(gefiltert, columns=["Zylinder"] + [f"Option {i+1}" for i in range(max_options_gefiltert)])
-                    
-                    # Erstelle zwei separate Excel-Dateien
-                    output_alle = io.BytesIO()
-                    with pd.ExcelWriter(output_alle, engine='openpyxl') as writer:
-                        df_alle.to_excel(writer, index=False, sheet_name="Alle Ergebnisse")
-                    output_alle.seek(0)
-                    
-                    output_gefiltert = io.BytesIO()
-                    with pd.ExcelWriter(output_gefiltert, engine='openpyxl') as writer:
-                        df_gefiltert.to_excel(writer, index=False, sheet_name="Gefilterte Ergebnisse")
-                    output_gefiltert.seek(0)
-                    
-                    # Download-Buttons
-                    st.success("Berechnung abgeschlossen!")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.download_button(
-                            label="Alle Ergebnisse herunterladen",
-                            data=output_alle,
-                            file_name=f"alle_abstaende_{label_length}mm.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                    
-                    with col2:
-                        st.download_button(
-                            label="Gefilterte Ergebnisse herunterladen",
-                            data=output_gefiltert,
-                            file_name=f"gefilterte_abstaende_{label_length}mm.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
-                    
-                    # Vorschau der Ergebnisse
-                    st.subheader("Vorschau der gefilterten Ergebnisse")
-                    st.dataframe(df_gefiltert.head(5))
-                
-                except Exception as e:
-                    st.error(f"Fehler beim Erstellen der Excel-Dateien: {str(e)}")
+            # Datenverarbeitung (originale Logik)
+            values = load_value_from_file(uploaded_file)
+            output_full = process_all(values, length)
+            filtered_output = process_all(values, length, filter=check_decimals)
+            
+            # Erstelle zwei separate Excel-Dateien im Speicher
+            # 1. Vollständige Ergebnisse
+            buffer_full = io.BytesIO()
+            with pd.ExcelWriter(buffer_full, engine='openpyxl') as writer:
+                pd.DataFrame(output_full).to_excel(
+                    writer, 
+                    index=False, 
+                    sheet_name='Vollständige Ergebnisse'
+                )
+            buffer_full.seek(0)
+            
+            # 2. Gefilterte Ergebnisse
+            buffer_filtered = io.BytesIO()
+            with pd.ExcelWriter(buffer_filtered, engine='openpyxl') as writer:
+                pd.DataFrame(filtered_output).to_excel(
+                    writer, 
+                    index=False, 
+                    sheet_name='Gefilterte Ergebnisse'
+                )
+            buffer_filtered.seek(0)
+            
+            st.success("Berechnung abgeschlossen!")
+            
+            # Zwei Download-Buttons nebeneinander
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.download_button(
+                    label="Vollständige Ergebnisse herunterladen",
+                    data=buffer_full,
+                    file_name=f"ergebnis_{length}_full.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
+            with col2:
+                st.download_button(
+                    label="Gefilterte Ergebnisse herunterladen",
+                    data=buffer_filtered,
+                    file_name=f"ergebnis_{length}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+            
+            # Vorschau der gefilterten Ergebnisse
+            st.subheader("Vorschau (gefilterte Ergebnisse)")
+            st.dataframe(pd.DataFrame(filtered_output).head())
+            
+        except ValueError:
+            st.error("Bitte eine gültige Zahl für die Etikett Länge eingeben.")
+        except Exception as e:
+            st.error(f"Ein Fehler ist aufgetreten: {str(e)}")
