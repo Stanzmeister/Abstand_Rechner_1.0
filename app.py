@@ -12,7 +12,6 @@ import io
 
 st.title("Rechner für Zylinder und Abstand")
 
-# Funktion aus deinem Code übernommen
 def process(value, length, filter=None):
     [name, x] = value
     possible_n_min = x / (length + 10)
@@ -50,8 +49,6 @@ def load_value_from_file(file):
     rs = correct_data(df.values.T[0:2].T)
     return rs
 
-# --- Streamlit Interface ---
-
 uploaded_file = st.file_uploader("Excel-Datei hochladen (xlsx)", type=["xlsx"])
 
 length_input = st.text_input("Etikett Länge (z.B. 50.0)", "0")
@@ -65,18 +62,12 @@ if st.button("Berechne und Exportiere"):
         except ValueError:
             st.error("Bitte eine gültige Zahl für die Etikett Länge eingeben.")
         else:
-            # Werte aus Excel laden
             values = load_value_from_file(uploaded_file)
-
-            # Berechnungen durchführen
             output_full = process_all(values, length)
             filtered_output = process_all(values, length, filter=check_decimals)
-
-            # Ergebnisse in DataFrames umwandeln
             df_full = pd.DataFrame(output_full)
             df_filtered = pd.DataFrame(filtered_output)
 
-            # Excel-Datei im Speicher erzeugen
             output_buffer = io.BytesIO()
             with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
                 df_full.to_excel(writer, index=False, sheet_name='Full Output')
@@ -86,7 +77,6 @@ if st.button("Berechne und Exportiere"):
 
             st.success("Berechnung abgeschlossen!")
 
-            # Download-Link anbieten
             st.download_button(
                 label="Ergebnis herunterladen (Excel)",
                 data=output_buffer,
